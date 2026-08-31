@@ -100,6 +100,13 @@ export function createSearchOutput(data: SearchApiResponse, flags: SearchFlags) 
     workPlaceAddress: job.workPlaceAddress ?? "",
     isSeen: job.isSeen,
     isFavorite: job.isFavorite,
+    company: job.hiringOrgName,
+    location: job.postalDistrictName ?? job.municipality ?? null,
+    date: job.publicationDate.slice(0, 10),
+    deadline: job.applicationDeadline && !job.applicationDeadline.startsWith("1900-01-01")
+      ? job.applicationDeadline.slice(0, 10)
+      : null,
+    url: `https://jobnet.dk/find-job/${job.jobAdId}`,
   }))
 
   if (flags.limit !== undefined) {
@@ -131,10 +138,10 @@ export const search = defineCommand({
     "search-string": option(z.string().optional(), {
       description: "Free-text keyword search (job title, skills, employer)",
     }),
-    page: option(z.coerce.number().default(1), {
+    page: option(z.coerce.number().int().min(1).default(1), {
       description: "Page number (1-indexed)",
     }),
-    "per-page": option(z.coerce.number().default(10), {
+    "per-page": option(z.coerce.number().int().min(1).default(10), {
       description: "Results per page",
     }),
     order: option(z.string().default("PublicationDate"), {
@@ -155,7 +162,7 @@ export const search = defineCommand({
     "postal-code": option(z.string().optional(), {
       description: "Postal code for radius search",
     }),
-    radius: option(z.coerce.number().default(50), {
+    radius: option(z.coerce.number().int().min(1).default(50), {
       description: "Radius in km from postal code",
     }),
     "occupation-area": option(z.string().optional(), {
@@ -164,7 +171,7 @@ export const search = defineCommand({
     "occupation-group": option(z.string().optional(), {
       description: "Occupation group identifier, e.g. 10060",
     }),
-    limit: option(z.coerce.number().optional(), {
+    limit: option(z.coerce.number().int().min(1).optional(), {
       description: "Cap total results returned by CLI",
     }),
     format: option(z.enum(["json", "table", "plain"]).default("json"), {

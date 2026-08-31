@@ -97,24 +97,87 @@ EOF
 (cd "$SMOKE_DIR" && xelatex -interaction=nonstopmode -halt-on-error cover_smoke.tex)
 ```
 
-### Optional: pdftotext (for the ATS check)
+#### Windows: Basic MiKTeX
 
-`/apply` runs an ATS parseability check on the compiled CV: it extracts the PDF's text layer and verifies contact details, reading order, and keyword coverage the way an applicant-tracking system sees them. This uses `pdftotext` from [poppler](https://poppler.freedesktop.org/), which is not part of TeX distributions:
+The full MiKTeX installer bundles every CTAN package and works out of the box, but the smaller [Basic MiKTeX](https://miktex.org/download) installer (`basic-miktex-*.exe`) only ships a minimal package set and needs a couple of one-time settings before the stock templates compile.
+
+By default, MiKTeX installs missing packages on demand but pops up a GUI prompt for each one — which blocks non-interactive terminals (including Claude Code's Bash tool). Turn that into a silent auto-install instead:
+
+```powershell
+initexmf --admin --set-config-value=[MPM]AutoInstall=1
+initexmf --set-config-value=[MPM]AutoInstall=1
+```
+
+(Run the first line from an elevated/Admin PowerShell if you installed MiKTeX for all users; the second line covers a per-user install. Only one will apply depending on how you installed it — running both is harmless.)
+
+If you'd rather not rely on on-the-fly installs at all (for example, for a fully offline compile later), pre-install the same package set the macOS TinyTeX section above lists, using MiKTeX's package manager:
+
+```powershell
+mpm --admin --install=moderncv --install=fontawesome5 --install=fontawesome6 --install=academicons --install=import --install=luatexbase --install=pgf --install=titlesec --install=textpos --install=xltxtra --install=xunicode --install=cite --install=realscripts --install=needspace
+```
+
+Drop `--admin` if MiKTeX is installed for the current user only. If a package name doesn't resolve, `mpm --find=<name>` searches the repository for the correct name.
+
+Quick smoke tests after setup (PowerShell):
+
+```powershell
+Set-Location cv; lualatex -interaction=nonstopmode -halt-on-error main_example.tex; Set-Location ..
+
+$SmokeDir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "ai-job-cover-smoke-$(Get-Random)")
+Copy-Item cover_letters\cover.cls, cover_letters\OpenFonts -Destination $SmokeDir -Recurse
+@'
+\documentclass[]{cover}
+\begin{document}
+\namesection{Test}{Candidate}{test@example.com}
+\companyname{Example Company}
+\companyaddress{123 Hiring Street\\Example City}
+\currentdate{\today}
+\lettercontent{Dear Hiring Manager,}
+\lettercontent{This smoke test verifies that xelatex can load cover.cls and the bundled fonts.}
+\closing{Sincerely,}
+\signature{Test Candidate}
+\end{document}
+'@ | Set-Content (Join-Path $SmokeDir "cover_smoke.tex")
+Push-Location $SmokeDir; xelatex -interaction=nonstopmode -halt-on-error cover_smoke.tex; Pop-Location
+```
+
+### Optional: ATS text extraction (pypdf, then pdftotext)
+
+`/apply` runs an ATS parseability check on the compiled CV: it extracts the PDF's text layer and verifies contact details, reading order, and keyword coverage the way an applicant-tracking system sees them.
+
+The default extractor is **pypdf** (BSD, `pip install pypdf`). Poppler `pdftotext` remains an optional fallback:
 
 - **macOS:** `brew install poppler`
 - **Debian/Ubuntu:** `sudo apt install poppler-utils`
 - **Windows:** `choco install poppler`
 
-If `pdftotext` is missing, `/apply` skips the mechanical check with a warning and falls back to a visual keyword review — everything else works normally.
+If a command still uses `pdftotext -layout`, it must pass `-enc UTF-8` as well. If **neither** extractor is available, `/apply` skips the mechanical check with a warning and falls back to a visual keyword review — everything else works normally.
 
 ## 2. Fork and clone
 
 ```bash
 gh repo fork MadsLorentzen/ai-job-search --clone
 cd ai-job-search
+gh repo set-default <your-github-username>/ai-job-search
 ```
 
 Or manually: fork on GitHub, then clone your fork.
+
+> **The `set-default` line is not optional.** `gh repo fork --clone` sets the
+> **upstream** repo as gh's default repository ("The `upstream` remote will be set as
+> the default remote repository" — `gh repo fork --help`), and gh uses the default for
+> **creating issues and PRs**. Without it, any later `gh issue create` run from this
+> clone — by you or by an agent you have asked to track your applications — silently
+> files on the upstream **public** tracker, publishing whatever the issue contains
+> under your GitHub identity, on a repo where you cannot delete it (#389).
+
+> **Before you go further: forks are public.** GitHub cannot make a fork of a public
+> repository private, and `/setup` (section 6) writes your personal data into **tracked**
+> files — pushing those commits to a fork publishes them. If this copy is for your own
+> job search rather than for contributing, prefer a **private repository** with this repo
+> as `upstream`: see section 8, step 1 for the exact commands and why committing your
+> personalization there is still the right move. Everything else in this guide works
+> identically either way.
 
 ## 3. Install job search CLI dependencies
 Run these from the repository root.
@@ -124,16 +187,16 @@ Run these from the repository root.
 ```powershell
 $tools = @("jobbank-search", "jobdanmark-search", "jobindex-search", "jobnet-search", "linkedin-search", "freehire-search")
 foreach ($tool in $tools) {
-  Set-Location ".agents/skills/$tool/cli"
+  Push-Location ".agents/skills/$tool/cli"
   bun install
-  Set-Location "..\..\..\.."
+  Pop-Location
 }
 ```
 
 - Bash / zsh / Git Bash:
 ```bash
 for tool in jobbank-search jobdanmark-search jobindex-search jobnet-search linkedin-search freehire-search; do
-  cd .agents/skills/$tool/cli && bun install && cd ../../../..
+  (cd .agents/skills/$tool/cli && bun install)
 done
 ```
 
@@ -228,17 +291,43 @@ After `/apply` creates the LaTeX files:
 
 ```bash
 # Bash / zsh / Git Bash
-cd cv && lualatex main_<company>.tex && cd ..
+cd cv && lualatex main_<company>_<role>.tex && cd ..
 cd cover_letters && xelatex cover_<company>_<role>.tex && cd ..
 ```
 
 ```powershell
 # PowerShell
-Set-Location cv; lualatex main_<company>.tex; Set-Location ..
+Set-Location cv; lualatex main_<company>_<role>.tex; Set-Location ..
 Set-Location cover_letters; xelatex cover_<company>_<role>.tex; Set-Location ..
 ```
 
 These commands apply to the stock templates (moderncv CV, `cover.cls` cover letter). If you'd rather use your own LaTeX template, run `/add-template` — it captures the template's compile engine, fonts, style rules, and page limit, test-compiles it, and wires it into `/apply`. See the "LaTeX templates" section in the README.
+
+## 8. Pulling upstream updates into your fork
+
+Upstream keeps improving the methodology files your fork has personalized, so plan for updates from day one:
+
+**Prefer releases over raw `master`.** Tagged [releases](../../releases) are vetted checkpoints, each described in [CHANGELOG.md](CHANGELOG.md). Updating to a tag pulls a stable, documented state instead of whatever `master` happens to be mid-review. Fetch tags with `git fetch upstream --tags` and merge a release (for example `git merge v1.0.0`) when you want stability; pull `master` directly only when you specifically want the latest unreleased changes. The steps below apply either way - substitute the release tag for `upstream/master` where you see it.
+
+1. **Commit your personalization - but know where those commits land.** `/setup` edits CLAUDE.md and the profile skill files in place; those edits are *yours*, and committing them is what lets updates merge cleanly. But a GitHub **fork of this repo is public** - forks of public repositories cannot be made private - so anything you commit *and push to a fork* is visible to anyone. If you want your profile in a remote at all, don't push it to a fork: create a **private** repository, push there, and add this repo as the `upstream` remote (`git remote add upstream https://github.com/MadsLorentzen/ai-job-search.git`) to keep receiving updates. Committing locally without pushing is also fine. The genuinely sensitive files (tracker, salary data, `documents/`, application archives) are gitignored and never enter git either way. An uncommitted working tree is the most common reason `git pull` refuses to merge at all (`Your local changes ... would be overwritten`).
+2. **Preview what changed before pulling:**
+   ```bash
+   git remote add upstream https://github.com/MadsLorentzen/ai-job-search.git   # first time only, if you cloned your own fork
+   git fetch upstream    # or origin, if you cloned the template directly
+   python3 tools/check_upstream_updates.py
+   ```
+   It compares the `framework_version` markers in your framework files against upstream and lists exactly which methodology files changed, with the diff command for each.
+
+   Two tools answer two different questions, and it's worth running both:
+   - **`check_upstream_updates.py`** — *which of my personalized files changed?* It reads the `framework_version` stamp on each methodology file, so it flags exactly the customized files a release touched.
+   - **`upstream_triage.py`** — *which upstream commits deserve my attention?* It walks the commits you're behind and sorts them into "worth reviewing" vs "probably skip", dropping anything you've already cherry-picked (matched by `git patch-id`, so ported work falls off with no bookkeeping), commits that only touch files your fork removed, and SHAs you've listed in `.github/upstream-wontport.txt`. It's report-only — it prints ready-to-run `git cherry-pick` lines but never merges, pushes, or opens a PR, because on a fork "applies cleanly" isn't "correct".
+
+     ```bash
+     python3 tools/upstream_triage.py --remote upstream
+     ```
+
+     Forks also inherit a `.github/workflows/upstream-watch.yml` that runs this weekly and writes the result into a single rolling issue (it no-ops on the upstream template itself, and stays disabled on a fork until you enable Actions).
+3. **Merge normally.** `git merge upstream/master` (or `git pull`) three-way-merges upstream's edits around your personalization; because methodology edits rarely touch the lines `/setup` filled in, most updates land cleanly. A conflict in a personalized file is a *feature*, not a failure — it means upstream changed methodology in a section you customized, and the version marker plus its changelog commit tell you why. Resolve by keeping your data and adopting the methodology change around it.
 
 ## Troubleshooting
 

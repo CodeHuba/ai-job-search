@@ -1,7 +1,8 @@
+import { parse as parseHtml } from "node-html-parser"
+
 export const BASE_URL = "https://jobbank.dk"
 
-export const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+export const USER_AGENT = "Mozilla/5.0 (compatible; jobbank-cli/1.0)"
 
 export function writeError(error: string, code: string): void {
   process.stderr.write(JSON.stringify({ error, code }) + "\n")
@@ -13,6 +14,7 @@ export async function fetchWithUA(url: string): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, {
       headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(15000),
     })
     if (response.status === 429 || response.status >= 500) {
       if (attempt === maxRetries) {
@@ -133,7 +135,11 @@ export function parseRssDescription(desc: string): ParsedDescription {
     if (deadlineStr.toLowerCase() === "løbende" || deadlineStr.toLowerCase() === "lobende") {
       deadline = null
     } else {
-      deadline = deadlineStr
+      // The feed writes DD.MM.YYYY; the /scrape contract (and this CLI's own
+      // detail command) use YYYY-MM-DD. Convert the known shape; anything else
+      // passes through so an unexpected value stays visible downstream.
+      const dmy = deadlineStr.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+      deadline = dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : deadlineStr
     }
     // Remove the deadline portion from rest
     rest = rest.substring(0, deadlineMatch.index).trim()
@@ -157,4 +163,37 @@ export function extractJobIdFromUrl(url: string): string {
   // URL format: https://jobbank.dk/job/{id}/{company-slug}/{title-slug}
   const match = url.match(/\/job\/(\d+)\//)
   return match ? match[1] : ""
+}
+
+function findJobPosting(value: unknown): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const jobPosting = findJobPosting(item)
+      if (jobPosting) return jobPosting
+    }
+    return null
+  }
+
+  if (!value || typeof value !== "object") return null
+
+  const record = value as Record<string, unknown>
+  if (record["@type"] === "JobPosting") return record
+
+  return findJobPosting(record["@graph"])
+}
+
+export function parseJobPostingJsonLd(html: string): Record<string, unknown> | null {
+  const root = parseHtml(html)
+  const scripts = root.querySelectorAll('script[type="application/ld+json"]')
+
+  for (const script of scripts) {
+    try {
+      const jobPosting = findJobPosting(JSON.parse(script.text) as unknown)
+      if (jobPosting) return jobPosting
+    } catch {
+      // Invalid JSON-LD should not prevent later scripts from being checked.
+    }
+  }
+
+  return null
 }

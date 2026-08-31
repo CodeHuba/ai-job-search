@@ -40,13 +40,47 @@ describe("parseJobPostingFromHtml", () => {
     );
 
     expect(parsed.title).toBe("Journalistisk udvikler søges");
-    expect(parsed.datePosted).toBe("03-07-2026");
-    expect(parsed.validThrough).toBe("02-08-2026 23.59");
+    // The fallback must emit the same shapes as the JSON-LD branch: contract
+    // dates, not the page's raw DD-MM-YYYY text (review finding F25, 2026-08-19).
+    expect(parsed.datePosted).toBe("2026-07-03");
+    expect(parsed.validThrough).toBe("2026-08-02");
     expect(parsed.employmentType).toEqual(["Fuldtid"]);
     expect(parsed.hiringOrganization.name).toBe("JFM");
     expect(parsed.hiringOrganization.logo).toBe("https://jobdanmark.dk/media/jfm-logo.png?width=100");
     expect(parsed.jobLocation.streetAddress).toBe("Banegårdspladsen 1, 5000 Odense C");
+    expect(parsed.jobLocation.addressLocality).toBe("Odense C");
     expect(parsed.description).toContain("identificere relevante datasæt");
     expect(parsed.applyUrl).toBe("https://jfm.career.emply.com/da/apply/example");
+  });
+
+  test("maps a rolling deadline (Løbende) to null in the HTML fallback", () => {
+    // "Løbende" is free text meaning rolling/ongoing - jobbank's parser maps
+    // its equivalent to null, and a stored "Løbende" deadline would hit every
+    // date-arithmetic consumer (review finding F25, 2026-08-19).
+    const html = HTML_WITHOUT_JSON_LD.replace(
+      "<li><strong>Ansøgningsfrist:</strong> 02-08-2026 23.59</li>",
+      "<li><strong>Ansøgningsfrist:</strong> Løbende</li>",
+    );
+    const parsed = parseJobPostingFromHtml(html, "s", "https://jobdanmark.dk/job/s");
+    expect(parsed.validThrough).toBeNull();
+  });
+
+  test("does not reject titles containing '404' mid-phrase", () => {
+    const htmlWith404InTitle = HTML_WITHOUT_JSON_LD.replace(
+      "<title>Journalistisk udvikler s&#xF8;ges | jobdanmark</title>",
+      "<title>HTTP 404 Page Designer | jobdanmark</title>",
+    ).replace(
+      '<h3 class="title">Journalistisk udvikler s&#xF8;ges</h3>',
+      '<h3 class="title">HTTP 404 Page Designer</h3>',
+    );
+
+    const parsed = parseJobPostingFromHtml(
+      htmlWith404InTitle,
+      "http-404-designer",
+      "https://jobdanmark.dk/job/http-404-designer",
+    );
+
+    expect(parsed.title).toBe("HTTP 404 Page Designer");
+    expect(parsed.hiringOrganization.name).toBe("JFM");
   });
 });
